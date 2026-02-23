@@ -1,0 +1,10 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": ["bin/**/*.ts", "lib/**/*.ts"],
+  "project": ["bin/**/*.ts", "lib/**/*.ts"],
+  "ignore": ["cdk.out/**", "node_modules/**"],
+  "ignoreDependencies": ["aws-cdk", "ts-node"],
+  "ignoreBinaries": ["eslint"],
+  "ignoreExportsUsedInFile": true,
+  "typescript": { "config": "tsconfig.json" }
+}

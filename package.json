@@ -1,0 +1,32 @@
+{
+  "name": "llm-as-a-judge-sample",
+  "version": "0.1.0",
+  "bin": {
+    "llm-as-a-judge-sample": "bin/llm-as-a-judge-sample.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "jest",
+    "cdk": "cdk",
+    "lint": "eslint . --format json --output-file eslint_results.json",
+    "lint:check": "eslint .",
+    "knip": "knip --reporter json > knip_results.json"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/jest": "^30",
+    "@types/node": "^24.10.1",
+    "jest": "^30",
+    "knip": "^5.0.0",
+    "ts-jest": "^29",
+    "aws-cdk": "2.1106.1",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.0.0"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.238.0",
+    "constructs": "^10.0.0"
+  }
+}

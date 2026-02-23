@@ -1,0 +1,284 @@
+name: PR自動修正（Copilot連携）
+
+on:
+  # Copilotレビュー完了時のみトリガー
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # ──────────────────────────────────────────────
+  # ジョブ1: 前準備（Copilotレビューのみを対象にフィルタリング）
+  # ──────────────────────────────────────────────
+  prepare:
+    runs-on: ubuntu-latest
+    # Copilot以外のレビューはスキップ（downstream jobも連鎖してスキップされる）
+    if: contains(github.event.review.user.login, 'copilot')
+    steps:
+      - name: PRブランチをチェックアウト
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Node.js 24をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      # npm ciを実行してnpmキャッシュを作成し、後続ジョブのインストールを高速化する
+      - name: 依存関係をインストール
+        run: npm ci
+
+  # ──────────────────────────────────────────────
+  # ジョブ2: ESLint静的解析（prepareと並列でknipと同時実行）
+  # ──────────────────────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    needs: [prepare]
+    steps:
+      - name: PRブランチをチェックアウト
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Node.js 24をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      # エラーがあっても後続ステップに進むためcontinue-on-error: trueを設定
+      - name: ESLintを実行（JSON出力）
+        continue-on-error: true
+        run: npm run lint
+
+      # autofixジョブで参照するためアーティファクトとして保存
+      - name: ESLint結果をアーティファクトとして保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: eslint-results
+          path: eslint_results.json
+          if-no-files-found: warn
+
+  # ──────────────────────────────────────────────
+  # ジョブ3: knip未使用コード解析（lintと並列実行）
+  # ──────────────────────────────────────────────
+  knip:
+    runs-on: ubuntu-latest
+    needs: [prepare]
+    steps:
+      - name: PRブランチをチェックアウト
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Node.js 24をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      # 未使用コードが検出されても後続ステップに進むためcontinue-on-error: trueを設定
+      - name: knipを実行（JSON出力）
+        continue-on-error: true
+        run: npm run knip
+
+      # autofixジョブで参照するためアーティファクトとして保存
+      - name: knip結果をアーティファクトとして保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: knip-results
+          path: knip_results.json
+          if-no-files-found: warn
+
+  # ──────────────────────────────────────────────
+  # ジョブ4: Copilotレビュー取得 → 自動修正 → PR解決済み更新
+  # ──────────────────────────────────────────────
+  autofix:
+    runs-on: ubuntu-latest
+    needs: [lint, knip]
+    steps:
+      # pushできるようfetch-depth: 0でフルクローン
+      - name: PRブランチをチェックアウト
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Node.js 24をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      # lint/knipジョブで生成したJSONファイルをワーキングディレクトリに配置
+      - name: ESLint結果をダウンロード
+        uses: actions/download-artifact@v4
+        with:
+          name: eslint-results
+        continue-on-error: true
+
+      - name: knip結果をダウンロード
+        uses: actions/download-artifact@v4
+        with:
+          name: knip-results
+        continue-on-error: true
+
+      # Copilotのレビュー本文とインラインコメントをGH APIで取得して1ファイルにまとめる
+      - name: Copilotのレビューコメントを取得
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "## GitHub Copilot レビュー本文"
+            echo "${{ github.event.review.body }}"
+            echo ""
+            echo "## GitHub Copilot インラインコメント"
+            gh api \
+              repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments \
+              --jq '.[] | select(.user.login | ascii_downcase | contains("copilot")) |
+                    "ファイル: \(.path) 行\(.line // .original_line): \(.body)"'
+          } > /tmp/copilot_review.txt
+
+      # CLAUDE.md・Copilotレビュー・ESLint・knipの結果を統合した修正プロンプトを生成する
+      - name: 自動修正プロンプトを生成
+        run: |
+          {
+            echo "あなたはTypeScript/AWS CDKの専門家です。"
+            echo "以下の開発規約（CLAUDE.md）に従い、コードレビュー・静的解析の結果のうち"
+            echo "「対応が必要」と判断したものだけを修正してください。"
+            echo ""
+            echo "## 修正の判断基準（必ず守ること）"
+            echo "- ESLintのエラー（severity=2）は必ず修正する"
+            echo "- ESLintの警告（severity=1）は、CLAUDE.mdの規約に明確に違反している場合のみ修正する"
+            echo "- knipの未使用コードは、DRY原則・単一責任の原則に違反している場合のみ修正する"
+            echo "- Copilotのレビューコメントは、開発規約に違反している指摘のみ修正する"
+            echo "- 動作に影響しない軽微な問題・好みの問題は修正しない"
+            echo "- AWS CDKコンストラクタの構造・動作は変えない"
+            echo ""
+            echo "## 開発規約（CLAUDE.md）"
+            cat CLAUDE.md
+            echo ""
+            echo "## GitHub Copilot コードレビュー結果"
+            cat /tmp/copilot_review.txt 2>/dev/null || echo "（Copilotのレビュー結果なし）"
+            echo ""
+            echo "## ESLint静的解析結果（JSON）"
+            cat eslint_results.json 2>/dev/null || echo "（ESLint結果なし）"
+            echo ""
+            echo "## knip未使用コード解析結果（JSON）"
+            cat knip_results.json 2>/dev/null || echo "（knip結果なし）"
+          } > /tmp/fix-prompt.txt
+
+      - name: OpenAI Codex（gpt-5）でコード自動修正
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: gpt-5
+          prompt-file: /tmp/fix-prompt.txt
+          safety-strategy: drop-sudo
+          output-file: /tmp/codex-output.txt
+
+      # 変更があった場合のみコミット・push（[skip ci]でこのワークフローの再トリガーを防止）
+      - name: 修正をコミットしてpush
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "修正対象の変更はありませんでした"
+          else
+            git commit -m "fix: Copilot/ESLint/knipによる自動修正 [skip ci]"
+            git push origin HEAD
+          fi
+
+      # 各Copilotスレッドに解決理由コメントを返信してから解決済みに更新する
+      - name: Copilotのレビューコメントに解決理由を返信して解決済みに更新
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 修正内容サマリーを読み込む（なければデフォルトメッセージを使用）
+          CODEX_SUMMARY=$(cat /tmp/codex-output.txt 2>/dev/null | head -c 1000 || echo "自動修正ツールにより対応しました。")
+          COMMIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "（コミットなし）")
+
+          # 解決理由のコメントテンプレートを生成
+          RESOLVE_COMMENT="🤖 **自動修正ツールによる対応**
+
+          この指摘はOpenAI Codex（gpt-5）による自動修正で対応しました。
+
+          **修正内容のサマリー:**
+          ${CODEX_SUMMARY}
+
+          **対応コミット:** ${COMMIT_SHA}
+
+          *CLAUDE.mdの開発規約に基づき、対応が必要と判断された指摘のみを修正しています。*"
+
+          # 未解決のCopilotスレッドIDとコメントIDをGraphQL APIで取得
+          gh api graphql -f query='
+            query($owner: String!, $repo: String!, $prNumber: Int!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $prNumber) {
+                  reviewThreads(first: 100) {
+                    nodes {
+                      id
+                      isResolved
+                      comments(first: 1) {
+                        nodes {
+                          databaseId
+                          author { login }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ' \
+            -f owner=${{ github.repository_owner }} \
+            -f repo=${{ github.event.repository.name }} \
+            -F prNumber=${{ github.event.pull_request.number }} \
+            --jq '
+              .data.repository.pullRequest.reviewThreads.nodes[]
+              | select(
+                  .isResolved == false and
+                  (.comments.nodes[0].author.login | ascii_downcase | contains("copilot"))
+                )
+              | "\(.id) \(.comments.nodes[0].databaseId)"
+            ' > /tmp/thread_info.txt
+
+          while IFS=' ' read -r thread_id comment_db_id; do
+            # 解決理由をスレッドに返信コメントとして投稿
+            gh api graphql -f query='
+              mutation($threadId: ID!, $body: String!) {
+                addPullRequestReviewThreadReply(input: {
+                  pullRequestReviewThreadId: $threadId,
+                  body: $body
+                }) {
+                  comment { id }
+                }
+              }
+            ' -f threadId="$thread_id" -f body="$RESOLVE_COMMENT"
+            echo "返信コメントを投稿: $thread_id"
+
+            # スレッドを解決済みに更新
+            gh api graphql -f query='
+              mutation($threadId: ID!) {
+                resolveReviewThread(input: { threadId: $threadId }) {
+                  thread { isResolved }
+                }
+              }
+            ' -f threadId="$thread_id"
+            echo "解決済みに更新: $thread_id"
+          done < /tmp/thread_info.txt

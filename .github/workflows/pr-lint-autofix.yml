@@ -16,7 +16,7 @@ jobs:
     prepare:
         runs-on: ubuntu-latest
         # Copilot以外のレビューはスキップ（downstream jobも連鎖してスキップされる）
-        if: contains(github.event.review.user.login, 'copilot')
+        #if: contains(github.event.review.user.login, 'copilot')
         steps:
             - name: PRブランチをチェックアウト
               uses: actions/checkout@v4

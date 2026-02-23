@@ -1,58 +1,144 @@
-name: PR自動修正（ESLint/knip/Copilot連携）
+name: PR自動修正（Copilot連携）
 
 on:
-  # Copilotレビュー完了時をメインのトリガーとする
+  # Copilotレビュー完了時のみトリガー
   pull_request_review:
     types: [submitted]
-  # Copilotレビューがない場合のフォールバック
-  pull_request:
-    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  lint-and-fix:
+  # ──────────────────────────────────────────────
+  # ジョブ1: 前準備（Copilotレビューのみを対象にフィルタリング）
+  # ──────────────────────────────────────────────
+  prepare:
     runs-on: ubuntu-latest
-    # pull_request_reviewの場合はCopilotのレビューのみを対象とする
-    if: |
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'pull_request_review' &&
-       contains(github.event.review.user.login, 'copilot'))
-
+    # Copilot以外のレビューはスキップ（downstream jobも連鎖してスキップされる）
+    if: contains(github.event.review.user.login, 'copilot')
     steps:
-      # ステップ1: PRブランチをチェックアウト
       - name: PRブランチをチェックアウト
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.event.review.commit_id }}
-          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
 
-      # ステップ2: Node.js 24をセットアップ（npmキャッシュ有効化）
       - name: Node.js 24をセットアップ
         uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: 'npm'
 
-      # ステップ3: 依存関係をインストール
+      # npm ciを実行してnpmキャッシュを作成し、後続ジョブのインストールを高速化する
       - name: 依存関係をインストール
         run: npm ci
 
-      # ステップ4: ESLintを実行してJSON形式で結果を出力
-      - name: ESLintを実行
+  # ──────────────────────────────────────────────
+  # ジョブ2: ESLint静的解析（prepareと並列でknipと同時実行）
+  # ──────────────────────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    needs: [prepare]
+    steps:
+      - name: PRブランチをチェックアウト
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Node.js 24をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      # エラーがあっても後続ステップに進むためcontinue-on-error: trueを設定
+      - name: ESLintを実行（JSON出力）
         continue-on-error: true
         run: npm run lint
 
-      # ステップ5: knipを実行して未使用コードをJSON形式で検出
-      - name: knipを実行
+      # autofixジョブで参照するためアーティファクトとして保存
+      - name: ESLint結果をアーティファクトとして保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: eslint-results
+          path: eslint_results.json
+          if-no-files-found: warn
+
+  # ──────────────────────────────────────────────
+  # ジョブ3: knip未使用コード解析（lintと並列実行）
+  # ──────────────────────────────────────────────
+  knip:
+    runs-on: ubuntu-latest
+    needs: [prepare]
+    steps:
+      - name: PRブランチをチェックアウト
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Node.js 24をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      # 未使用コードが検出されても後続ステップに進むためcontinue-on-error: trueを設定
+      - name: knipを実行（JSON出力）
         continue-on-error: true
         run: npm run knip
 
-      # ステップ6: Copilotのレビュー本文とインラインコメントをGH APIで取得
+      # autofixジョブで参照するためアーティファクトとして保存
+      - name: knip結果をアーティファクトとして保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: knip-results
+          path: knip_results.json
+          if-no-files-found: warn
+
+  # ──────────────────────────────────────────────
+  # ジョブ4: Copilotレビュー取得 → 自動修正 → PR解決済み更新
+  # ──────────────────────────────────────────────
+  autofix:
+    runs-on: ubuntu-latest
+    needs: [lint, knip]
+    steps:
+      # pushできるようfetch-depth: 0でフルクローン
+      - name: PRブランチをチェックアウト
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Node.js 24をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      # lint/knipジョブで生成したJSONファイルをワーキングディレクトリに配置
+      - name: ESLint結果をダウンロード
+        uses: actions/download-artifact@v4
+        with:
+          name: eslint-results
+        continue-on-error: true
+
+      - name: knip結果をダウンロード
+        uses: actions/download-artifact@v4
+        with:
+          name: knip-results
+        continue-on-error: true
+
+      # Copilotのレビュー本文とインラインコメントをGH APIで取得して1ファイルにまとめる
       - name: Copilotのレビューコメントを取得
-        if: github.event_name == 'pull_request_review'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -67,7 +153,7 @@ jobs:
                     "ファイル: \(.path) 行\(.line // .original_line): \(.body)"'
           } > /tmp/copilot_review.txt
 
-      # ステップ7: CLAUDE.mdと各ツールの結果を組み合わせた自動修正プロンプトを動的生成
+      # CLAUDE.md・Copilotレビュー・ESLint・knipの結果を統合した修正プロンプトを生成する
       - name: 自動修正プロンプトを生成
         run: |
           {
@@ -96,7 +182,6 @@ jobs:
             cat knip_results.json 2>/dev/null || echo "（knip結果なし）"
           } > /tmp/fix-prompt.txt
 
-      # ステップ8: OpenAI Codex（gpt-5）を使ってコードを自動修正する
       - name: OpenAI Codex（gpt-5）でコード自動修正
         uses: openai/codex-action@v1
         with:
@@ -106,7 +191,7 @@ jobs:
           safety-strategy: drop-sudo
           output-file: /tmp/codex-output.txt
 
-      # ステップ9: 修正内容をコミットしてpush（[skip ci]でループ防止）
+      # 変更があった場合のみコミット・push（[skip ci]でこのワークフローの再トリガーを防止）
       - name: 修正をコミットしてpush
         run: |
           git config user.name "github-actions[bot]"
@@ -119,9 +204,8 @@ jobs:
             git push origin HEAD
           fi
 
-      # ステップ10: 解決理由のコメントをCopilotスレッドに返信して解決済みに更新
+      # 各Copilotスレッドに解決理由コメントを返信してから解決済みに更新する
       - name: Copilotのレビューコメントに解決理由を返信して解決済みに更新
-        if: github.event_name == 'pull_request_review'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

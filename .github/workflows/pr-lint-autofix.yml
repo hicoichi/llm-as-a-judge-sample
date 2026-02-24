@@ -227,7 +227,7 @@ jobs:
                       fs.writeFileSync('/tmp/copilot_threads.json', JSON.stringify(threads));
                       console.log(`取得したCopilotスレッド数: ${threads.length}`);
 
-            # CLAUDE.md・Copilotレビュー・ESLint・knipの結果を統合した修正プロンプトを生成する
+            # copilot-instructions.md・Copilotレビュー・ESLint・knipの結果を統合した修正プロンプトを生成する
             - name: 自動修正プロンプトを生成
               run: |
                   {
@@ -237,7 +237,7 @@ jobs:
                     echo ""
                     echo "## 修正の判断基準（必ず守ること）"
                     echo "- ESLintのエラー（severity=2）は必ず修正する"
-                    echo "- ESLintの警告（severity=1）は、CLAUDE.mdの規約に明確に違反している場合のみ修正する"
+                    echo "- ESLintの警告（severity=1）は、copilot-instructions.mdの規約に明確に違反している場合のみ修正する"
                     echo "- knipの未使用コードは、DRY原則・単一責任の原則に違反している場合のみ修正する"
                     echo "- Copilotのレビューコメントは、開発規約に違反している指摘のみ修正する"
                     echo "- 動作に影響しない軽微な問題・好みの問題は修正しない"
@@ -357,7 +357,7 @@ jobs:
                           : `🤖 **自動修正ツールによる確認（未対応）**\n\n` +
                             `この指摘は今回の自動修正では対応しませんでした。\n\n` +
                             `**理由:** ${res.reason}\n\n` +
-                            `*CLAUDE.mdの開発規約に基づき、対応不要と判断した指摘は修正していません。手動での確認をお願いします。*`;
+                            `*copilot-instructions.mdの開発規約に基づき、対応不要と判断した指摘は修正していません。手動での確認をお願いします。*`;
 
                         await github.graphql(`
                           mutation($threadId: ID!, $body: String!) {

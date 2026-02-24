@@ -232,7 +232,7 @@ jobs:
               run: |
                   {
                     echo "あなたはTypeScript/AWS CDKの専門家です。"
-                    echo "以下の開発規約（CLAUDE.md）に従い、コードレビュー・静的解析の結果のうち"
+                    echo "以下の開発規約（copilot-instructions.md）に従い、コードレビュー・静的解析の結果のうち"
                     echo "「対応が必要」と判断したものだけを修正してください。"
                     echo ""
                     echo "## 修正の判断基準（必ず守ること）"
@@ -243,8 +243,8 @@ jobs:
                     echo "- 動作に影響しない軽微な問題・好みの問題は修正しない"
                     echo "- AWS CDKコンストラクタの構造・動作は変えない"
                     echo ""
-                    echo "## 開発規約（CLAUDE.md）"
-                    cat CLAUDE.md
+                    echo "## 開発規約(copilot-instructions.md)"
+                    cat ./github/copilot-instructions.md
                     echo ""
                     echo "## GitHub Copilot コードレビュー結果"
                     cat /tmp/copilot_review.txt 2>/dev/null || echo "（Copilotのレビュー結果なし）"

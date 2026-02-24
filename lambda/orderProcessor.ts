@@ -1,139 +1,142 @@
-// 注文処理Lambda
+// 注文処理Lambda（五条悟ボイスでいくよ）
 
-// 未使用インポート（knip/ESLintで検出される）
-import * as crypto from 'crypto';
+// 環境変数から設定値を取得（ハードコード禁止：CLAUDE.md セキュリティ規約）
+const ORDERS_TABLE = process.env.ORDERS_TABLE ?? '';
+const HISTORY_TABLE = process.env.HISTORY_TABLE ?? '';
+const SNS_TOPIC = process.env.SNS_TOPIC ?? '';
 
-// ハードコードされた設定値（環境変数を使うべき）
-const ORDERS_TABLE = 'orders-table-prod';
-const HISTORY_TABLE = 'order-history-prod';
-const SNS_TOPIC = 'arn:aws:sns:ap-northeast-1:123456789012:order-notifications';
+// ビジネスロジックで使う定数（マジックナンバー禁止）
+const DISCOUNT_THRESHOLD = 1000;
+const DISCOUNT_RATE = 0.1;
 
-// anyを使ったダミークライアント（実際はSDKを使うべき）
-const db: any = { put: async (p: any) => p, get: async (p: any) => p };
-const snsClient: any = { publish: async (p: any) => p };
+// 依存関係の最小インターフェース（interfaceで型安全：CLAUDE.md）
+interface PutParams<T = Record<string, unknown>> {
+  TableName: string;
+  Item?: T;
+  Key?: Record<string, unknown>;
+}
 
-// 戻り値の型なし・引数にany使用
-export const handler = async (event: any) => {
-    // try/catchなし・バリデーションなし
-    const body = JSON.parse(event.body);
+interface DbClient {
+  put<T>(params: PutParams<T>): Promise<unknown>;
+  get<T>(params: { TableName: string; Key: Record<string, unknown> }): Promise<T | null>;
+}
 
-    // varの使用（constまたはletを使うべき）
-    var orderId = body.orderId;
-    var userId = body.userId;
-    var items = body.items;
-    var discount = 0;
+interface SnsPublishInput {
+  TopicArn: string;
+  Message: string;
+  Subject?: string;
+}
 
-    // 深いネスト（早期リターンで解消すべき）
-    if (items) {
-        if (items.length > 0) {
-            if (userId) {
-                if (orderId) {
-                    var total = 0;
-                    for (var i = 0; i < items.length; i++) {
-                        if (items[i].price && items[i].quantity) {
-                            total += items[i].price * items[i].quantity;
-                        }
-                    }
+interface SnsClient {
+  publish(params: SnsPublishInput): Promise<{ MessageId?: string }>;
+}
 
-                    // マジックナンバー（名前付き定数にすべき）
-                    if (total > 1000) {
-                        discount = total * 0.1;
-                    }
-                    const finalTotal = total - discount;
-
-                    // awaitなし（Promiseを握りつぶしている）
-                    db.put({
-                        TableName: ORDERS_TABLE,
-                        Item: {
-                            orderId,
-                            userId,
-                            total: finalTotal,
-                            status: 'PENDING',
-                            createdAt: new Date().toISOString(),
-                        },
-                    });
-
-                    // DRY違反：同じput処理を別テーブルにコピペ
-                    db.put({
-                        TableName: HISTORY_TABLE,
-                        Item: {
-                            orderId,
-                            userId,
-                            total: finalTotal,
-                            status: 'PENDING',
-                            createdAt: new Date().toISOString(),
-                        },
-                    });
-
-                    // awaitなし
-                    snsClient.publish({
-                        TopicArn: SNS_TOPIC,
-                        Message:
-                            '注文受付: ' + orderId + ' 合計: ' + finalTotal,
-                        Subject: 'New Order',
-                    });
-
-                    // 使われない変数
-                    const processedAt = new Date().toISOString();
-
-                    return {
-                        statusCode: 200,
-                        body: JSON.stringify({ ok: true }),
-                    };
-                }
-            }
-        }
-    }
-
-    // 不明瞭なエラーレスポンス
-    return { statusCode: 400, body: JSON.stringify({ error: 'Invalid' }) };
+// ダミークライアントの型安全な最小実装（実運用ではAWS SDKに置換）
+const db: DbClient = {
+  async put(p) {
+    return p;
+  },
+  async get() {
+    return null;
+  },
 };
 
-// 50行超の関数（CLAUDE.md違反）・anyの多用・深いネスト
-async function processRefund(orderId: any, userId: any, amount: any) {
-    if (orderId) {
-        if (userId) {
-            if (amount > 0) {
-                const existing = await db.get({
-                    TableName: ORDERS_TABLE,
-                    Key: { orderId },
-                });
-                if (existing) {
-                    if (existing.status === 'COMPLETED') {
-                        // DRY違反：handler内のput処理と同じパターンを繰り返している
-                        await db.put({
-                            TableName: ORDERS_TABLE,
-                            Item: {
-                                ...existing,
-                                status: 'REFUNDED',
-                                refundAmount: amount,
-                                updatedAt: new Date().toISOString(),
-                            },
-                        });
-                        await db.put({
-                            TableName: HISTORY_TABLE,
-                            Item: {
-                                ...existing,
-                                status: 'REFUNDED',
-                                refundAmount: amount,
-                                updatedAt: new Date().toISOString(),
-                            },
-                        });
+const snsClient: SnsClient = {
+  async publish() {
+    return { MessageId: 'dummy-message-id' };
+  },
+};
 
-                        await snsClient.publish({
-                            TopicArn: SNS_TOPIC,
-                            Message:
-                                'Refund processed: ' +
-                                orderId +
-                                ' amount: ' +
-                                amount,
-                        });
-
-                        return { success: true };
-                    }
-                }
-            }
-        }
-    }
-    return { success: false };
+// 入力型とバリデーション（外部入力は必ず検証：CLAUDE.md）
+interface OrderItem {
+  price: number;
+  quantity: number;
 }
+
+interface OrderRequestBody {
+  orderId: string;
+  userId: string;
+  items: OrderItem[];
+}
+
+function isValidOrderRequestBody(value: unknown): value is OrderRequestBody {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.orderId !== 'string' || v.orderId.trim() === '') return false;
+  if (typeof v.userId !== 'string' || v.userId.trim() === '') return false;
+  if (!Array.isArray(v.items)) return false;
+  for (const it of v.items) {
+    if (!it || typeof it !== 'object') return false;
+    const { price, quantity } = it as Record<string, unknown>;
+    if (typeof price !== 'number' || !Number.isFinite(price)) return false;
+    if (typeof quantity !== 'number' || !Number.isFinite(quantity)) return false;
+  }
+  return true;
+}
+
+// 最小のイベント/レスポンス型（依存追加せずに型安全を担保）
+type ApiGatewayEvent = { body: string | null | undefined };
+type ApiGatewayResult = { statusCode: number; body: string };
+
+// 共通処理（DRY）：二つのテーブルに同一レコードを書き込む
+async function putOrderToBothTables<T extends Record<string, unknown>>(item: T): Promise<void> {
+  await Promise.all([
+    db.put<T>({ TableName: ORDERS_TABLE, Item: item }),
+    db.put<T>({ TableName: HISTORY_TABLE, Item: item }),
+  ]);
+}
+
+function calculateFinalTotal(items: OrderItem[]): { total: number; discount: number; finalTotal: number } {
+  const total = items.reduce((acc, cur) => acc + cur.price * cur.quantity, 0);
+  const discount = total > DISCOUNT_THRESHOLD ? total * DISCOUNT_RATE : 0;
+  return { total, discount, finalTotal: total - discount };
+}
+
+// メインのLambdaハンドラー（単一責務・50行以下を維持）
+export const handler = async (event: ApiGatewayEvent): Promise<ApiGatewayResult> => {
+  // ガード節：必須の環境変数が未設定なら即エラー
+  if (!ORDERS_TABLE || !HISTORY_TABLE || !SNS_TOPIC) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: 'サーバ設定が不足しています（テーブル名/SNSトピック）。' }),
+    };
+  }
+
+  if (!event || typeof event.body !== 'string') {
+    return { statusCode: 400, body: JSON.stringify({ error: 'bodyはJSON文字列で指定してね。' }) };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(event.body);
+  } catch {
+    return { statusCode: 400, body: JSON.stringify({ error: 'JSONの形式が不正だよ。' }) };
+  }
+
+  if (!isValidOrderRequestBody(parsed)) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ error: '必須項目が不正または不足（orderId, userId, items）。' }),
+    };
+  }
+
+  const body = parsed as OrderRequestBody;
+  const { finalTotal } = calculateFinalTotal(body.items);
+
+  const item = {
+    orderId: body.orderId,
+    userId: body.userId,
+    total: finalTotal,
+    status: 'PENDING',
+    createdAt: new Date().toISOString(),
+  };
+
+  await putOrderToBothTables(item);
+  await snsClient.publish({
+    TopicArn: SNS_TOPIC,
+    Message: '注文受付: ' + body.orderId + ' 合計: ' + finalTotal,
+    Subject: 'New Order',
+  });
+
+  return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+};

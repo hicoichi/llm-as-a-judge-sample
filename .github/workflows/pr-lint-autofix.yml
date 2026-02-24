@@ -1,7 +1,7 @@
 name: PR自動修正（Copilot連携）
 
 on:
-    # PRに「@review」とコメントすることでトリガーする
+    # PRに「@fix」とコメントすることでトリガーする
     # issue_commentのactorはコメントした人間（write権限あり）になるため
     # codex-actionのcollaboratorチェックを確実に通過できる
     issue_comment:
@@ -14,14 +14,14 @@ permissions:
 jobs:
     # ──────────────────────────────────────────────
     # ジョブ1: 前準備
-    # PRへの「@review」コメントのみを対象とし、head_refをAPIで取得して後続ジョブに渡す
+    # PRへの「@fix」コメントのみを対象とし、head_refをAPIで取得して後続ジョブに渡す
     # ──────────────────────────────────────────────
     prepare:
         runs-on: ubuntu-latest
-        # PRへのコメントかつ「@review」を含む場合のみ実行する
+        # PRへのコメントかつ「@fix」を含む場合のみ実行する
         if: |
             github.event.issue.pull_request != null &&
-            contains(github.event.comment.body, '@review')
+            contains(github.event.comment.body, '@fix')
         outputs:
             head_ref: ${{ steps.pr-info.outputs.head_ref }}
             pr_number: ${{ steps.pr-info.outputs.pr_number }}
@@ -29,13 +29,17 @@ jobs:
             # issue_commentイベントにはhead.refが含まれないためAPIで取得する
             - name: PRのブランチ情報を取得
               id: pr-info
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  PR_NUMBER="${{ github.event.issue.number }}"
-                  HEAD_REF=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER" --jq '.head.ref')
-                  echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-                  echo "head_ref=$HEAD_REF"   >> $GITHUB_OUTPUT
+              uses: actions/github-script@v7
+              with:
+                script: |
+                  const prNumber = context.issue.number;
+                  const { data: pr } = await github.rest.pulls.get({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: prNumber,
+                  });
+                  core.setOutput('pr_number', String(prNumber));
+                  core.setOutput('head_ref', pr.head.ref);
 
             - name: PRブランチをチェックアウト
               uses: actions/checkout@v4
@@ -157,21 +161,71 @@ jobs:
               continue-on-error: true
 
             # CopilotのレビューをAPIで取得する（issue_commentイベントにはreview情報がないため）
+            # REST APIでレビュー本文・インラインコメントを取得し、GraphQL APIでスレッド詳細も取得する
             - name: Copilotのレビューコメントを取得
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  PR_NUMBER="${{ needs.prepare.outputs.pr_number }}"
-                  {
-                    echo "## GitHub Copilot レビュー本文"
-                    gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" \
-                      --jq '[.[] | select(.user.login | ascii_downcase | contains("copilot"))] | last | .body // ""'
-                    echo ""
-                    echo "## GitHub Copilot インラインコメント"
-                    gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/comments" \
-                      --jq '.[] | select(.user.login | ascii_downcase | contains("copilot")) |
-                            "ファイル: \(.path) 行\(.line // .original_line): \(.body)"'
-                  } > /tmp/copilot_review.txt
+              uses: actions/github-script@v7
+              with:
+                script: |
+                  const fs = require('fs');
+                  const prNumber = parseInt('${{ needs.prepare.outputs.pr_number }}');
+
+                  // レビュー本文（REST）
+                  const { data: reviews } = await github.rest.pulls.listReviews({
+                    owner: context.repo.owner, repo: context.repo.repo, pull_number: prNumber,
+                  });
+                  const copilotReview = reviews
+                    .filter(r => r.user.login.toLowerCase().includes('copilot'))
+                    .at(-1);
+
+                  // インラインコメント（REST）
+                  const { data: comments } = await github.rest.pulls.listReviewComments({
+                    owner: context.repo.owner, repo: context.repo.repo, pull_number: prNumber,
+                  });
+                  const copilotComments = comments.filter(c =>
+                    c.user.login.toLowerCase().includes('copilot')
+                  );
+
+                  // codex用テキストファイル生成
+                  let reviewText = '## GitHub Copilot レビュー本文\n';
+                  reviewText += (copilotReview?.body ?? '') + '\n\n';
+                  reviewText += '## GitHub Copilot インラインコメント\n';
+                  for (const c of copilotComments) {
+                    reviewText += `ファイル: ${c.path} 行${c.line ?? c.original_line}: ${c.body}\n`;
+                  }
+                  fs.writeFileSync('/tmp/copilot_review.txt', reviewText);
+
+                  // スレッド詳細JSON（GraphQL）：後続の個別分析ステップで使用
+                  const result = await github.graphql(`
+                    query($owner: String!, $repo: String!, $prNumber: Int!) {
+                      repository(owner: $owner, name: $repo) {
+                        pullRequest(number: $prNumber) {
+                          reviewThreads(first: 100) {
+                            nodes {
+                              id isResolved path line originalLine
+                              comments(first: 1) {
+                                nodes { author { login } body }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  `, { owner: context.repo.owner, repo: context.repo.repo, prNumber });
+
+                  const threads = result.repository.pullRequest.reviewThreads.nodes
+                    .filter(n =>
+                      !n.isResolved &&
+                      n.comments.nodes[0]?.author?.login?.toLowerCase().includes('copilot')
+                    )
+                    .map(n => ({
+                      id: n.id,
+                      path: n.path,
+                      line: n.line ?? n.originalLine,
+                      body: n.comments.nodes[0].body,
+                    }));
+
+                  fs.writeFileSync('/tmp/copilot_threads.json', JSON.stringify(threads));
+                  console.log(`取得したCopilotスレッド数: ${threads.length}`);
 
             # CLAUDE.md・Copilotレビュー・ESLint・knipの結果を統合した修正プロンプトを生成する
             - name: 自動修正プロンプトを生成
@@ -213,95 +267,114 @@ jobs:
                   output-file: /tmp/codex-output.txt
 
             # 変更があった場合のみコミット・push（[skip ci]でこのワークフローの再トリガーを防止）
+            # SHAを後続ステップのコメントで使用するためoutputとして出力する
             - name: 修正をコミットしてpush
+              id: commit-push
               run: |
                   git config user.name "github-actions[bot]"
                   git config user.email "github-actions[bot]@users.noreply.github.com"
                   git add -A
                   if git diff --cached --quiet; then
                     echo "修正対象の変更はありませんでした"
+                    echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
                   else
                     git commit -m "fix: Copilot/ESLint/knipによる自動修正 [skip ci]"
                     git push origin HEAD
+                    echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
                   fi
 
-            # 各Copilotスレッドに解決理由コメントを返信してから解決済みに更新する
-            - name: Copilotのレビューコメントに解決理由を返信して解決済みに更新
+            # git diffとCopilotコメントをOpenAI APIで照合し、コメントごとに対応状況を判定する
+            - name: 各Copilotコメントへの対応状況をAIで分析
               env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
               run: |
-                  PR_NUMBER="${{ needs.prepare.outputs.pr_number }}"
-                  REPO_OWNER="${{ github.repository_owner }}"
-                  REPO_NAME="${GITHUB_REPOSITORY#*/}"
+                  # 修正コミットのdiffを取得（変更なしの場合は空文字）
+                  GIT_DIFF=$(git diff HEAD~1 HEAD 2>/dev/null || echo "")
+                  THREADS=$(cat /tmp/copilot_threads.json 2>/dev/null || echo "[]")
 
-                  CODEX_SUMMARY=$(cat /tmp/codex-output.txt 2>/dev/null | head -c 1000 || echo "自動修正ツールにより対応しました。")
-                  COMMIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "（コミットなし）")
+                  # スレッドが0件の場合はスキップ
+                  if [ "$(echo "$THREADS" | jq 'length')" -eq 0 ]; then
+                    echo "[]" > /tmp/comment_resolutions.json
+                    exit 0
+                  fi
 
-                  RESOLVE_COMMENT="🤖 **自動修正ツールによる対応**
-
-                  この指摘はOpenAI Codex（gpt-5）による自動修正で対応しました。
-
-                  **修正内容のサマリー:**
-                  ${CODEX_SUMMARY}
-
-                  **対応コミット:** ${COMMIT_SHA}
-
-                  *CLAUDE.mdの開発規約に基づき、対応が必要と判断された指摘のみを修正しています。*"
-
-                  # 未解決のCopilotスレッドIDをGraphQL APIで取得
-                  gh api graphql -f query='
-                    query($owner: String!, $repo: String!, $prNumber: Int!) {
-                      repository(owner: $owner, name: $repo) {
-                        pullRequest(number: $prNumber) {
-                          reviewThreads(first: 100) {
-                            nodes {
-                              id
-                              isResolved
-                              comments(first: 1) {
-                                nodes {
-                                  databaseId
-                                  author { login }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  ' \
-                    -f owner="$REPO_OWNER" \
-                    -f repo="$REPO_NAME" \
-                    -F prNumber="$PR_NUMBER" \
-                    --jq '
-                      .data.repository.pullRequest.reviewThreads.nodes[]
-                      | select(
-                          .isResolved == false and
-                          (.comments.nodes[0].author.login | ascii_downcase | contains("copilot"))
+                  # jqでAPIリクエストボディを組み立てる（シェル変数の特殊文字をエスケープ）
+                  jq -n \
+                    --arg diff "$GIT_DIFF" \
+                    --argjson threads "$THREADS" \
+                    '{
+                      model: "gpt-4o",
+                      response_format: {type: "json_object"},
+                      messages: [{
+                        role: "user",
+                        content: (
+                          "以下のgit diffとGitHub Copilotのレビューコメント一覧を照合し、"
+                          + "各コメントがこのコミットで対応されたかを判定してください。\n\n"
+                          + "判定基準:\n"
+                          + "- diffにコメントで指摘された問題への対応変更がある → addressed: true\n"
+                          + "- 対応する変更がない/無関係な変更のみ → addressed: false\n"
+                          + "- reasonは日本語で具体的に記載すること\n\n"
+                          + "出力形式（コードブロックなしのJSONオブジェクト）:\n"
+                          + "{\"<スレッドID>\": {\"addressed\": true/false, \"reason\": \"理由\"}, ...}\n\n"
+                          + "## Git Diff\n" + $diff + "\n\n"
+                          + "## Copilotコメント一覧（JSON）\n" + ($threads | tostring)
                         )
-                      | "\(.id) \(.comments.nodes[0].databaseId)"
-                    ' > /tmp/thread_info.txt
+                      }]
+                    }' > /tmp/analysis-request.json
 
-                  while IFS=' ' read -r thread_id comment_db_id; do
-                    # 解決理由をスレッドに返信コメントとして投稿
-                    gh api graphql -f query='
+                  # OpenAI APIを呼び出し、JSONレスポンスを保存
+                  curl -s https://api.openai.com/v1/chat/completions \
+                    -H "Content-Type: application/json" \
+                    -H "Authorization: Bearer $OPENAI_API_KEY" \
+                    -d @/tmp/analysis-request.json \
+                    | jq '.choices[0].message.content | fromjson' > /tmp/comment_resolutions.json
+
+            # 各CopilotスレッドにAI分析結果を元に個別返信し、対応済みのみ解決済みに更新する
+            - name: Copilotコメントに個別返信して選択的に解決済み更新
+              uses: actions/github-script@v7
+              env:
+                COMMIT_SHA: ${{ steps.commit-push.outputs.sha }}
+              with:
+                script: |
+                  const fs = require('fs');
+
+                  const threads = JSON.parse(fs.readFileSync('/tmp/copilot_threads.json', 'utf8'));
+                  const resolutions = JSON.parse(
+                    fs.readFileSync('/tmp/comment_resolutions.json', 'utf8')
+                  );
+                  const commitSha = process.env.COMMIT_SHA ?? '（コミットなし）';
+
+                  for (const thread of threads) {
+                    const res = resolutions[thread.id] ?? {
+                      addressed: false, reason: '分析結果が取得できませんでした',
+                    };
+
+                    const comment = res.addressed
+                      ? `🤖 **自動修正ツールによる対応（対応済み）**\n\n` +
+                        `この指摘はOpenAI Codex（gpt-5）による自動修正で対応しました。\n\n` +
+                        `**対応内容:** ${res.reason}\n\n` +
+                        `**対応コミット:** ${commitSha}`
+                      : `🤖 **自動修正ツールによる確認（未対応）**\n\n` +
+                        `この指摘は今回の自動修正では対応しませんでした。\n\n` +
+                        `**理由:** ${res.reason}\n\n` +
+                        `*CLAUDE.mdの開発規約に基づき、対応不要と判断した指摘は修正していません。手動での確認をお願いします。*`;
+
+                    await github.graphql(`
                       mutation($threadId: ID!, $body: String!) {
                         addPullRequestReviewThreadReply(input: {
-                          pullRequestReviewThreadId: $threadId,
-                          body: $body
-                        }) {
-                          comment { id }
-                        }
+                          pullRequestReviewThreadId: $threadId, body: $body
+                        }) { comment { id } }
                       }
-                    ' -f threadId="$thread_id" -f body="$RESOLVE_COMMENT"
-                    echo "返信コメントを投稿: $thread_id"
+                    `, { threadId: thread.id, body: comment });
 
-                    # スレッドを解決済みに更新
-                    gh api graphql -f query='
-                      mutation($threadId: ID!) {
-                        resolveReviewThread(input: { threadId: $threadId }) {
-                          thread { isResolved }
+                    if (res.addressed) {
+                      await github.graphql(`
+                        mutation($threadId: ID!) {
+                          resolveReviewThread(input: { threadId: $threadId }) { thread { isResolved } }
                         }
-                      }
-                    ' -f threadId="$thread_id"
-                    echo "解決済みに更新: $thread_id"
-                  done < /tmp/thread_info.txt
+                      `, { threadId: thread.id });
+                      console.log(`対応済み・解決済みに更新: ${thread.id}`);
+                    } else {
+                      console.log(`未対応・resolveしない: ${thread.id}`);
+                    }
+                  }

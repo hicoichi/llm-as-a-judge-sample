@@ -6,8 +6,8 @@ on:
         types: [submitted]
 
 permissions:
-    contents: read
-    pull-requests: read
+    contents: write
+    pull-requests: write
 
 jobs:
     # ──────────────────────────────────────────────
@@ -182,10 +182,13 @@ jobs:
                     cat knip_results.json 2>/dev/null || echo "（knip結果なし）"
                   } > /tmp/fix-prompt.txt
 
+            # github-tokenにPATを渡すことでactorをPAT所有者（write権限あり）として認識させる
+            # GH_PATはリポジトリへのcontents: writeスコープを持つFine-grained PATをSecretsに設定すること
             - name: OpenAI Codex（gpt-5）でコード自動修正
               uses: openai/codex-action@v1
               with:
                   openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+                  github-token: ${{ secrets.GH_PAT }}
                   model: gpt-5
                   prompt-file: /tmp/fix-prompt.txt
                   safety-strategy: drop-sudo

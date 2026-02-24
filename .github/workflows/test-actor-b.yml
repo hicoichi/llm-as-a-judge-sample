@@ -1,0 +1,16 @@
+name: test-actor-B
+
+on:
+  workflow_run:
+    workflows: ["test-actor-A"]
+    types: [completed]
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    steps:
+      - name: actorを出力
+        run: |
+          echo "actor:            ${{ github.actor }}"
+          echo "triggering_actor: ${{ github.triggering_actor }}"
+          echo "event_name:       ${{ github.event_name }}"

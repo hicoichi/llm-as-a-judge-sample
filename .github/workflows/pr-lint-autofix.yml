@@ -244,7 +244,7 @@ jobs:
                     echo "- AWS CDKコンストラクタの構造・動作は変えない"
                     echo ""
                     echo "## 開発規約(copilot-instructions.md)"
-                    cat ./github/copilot-instructions.md
+                    cat .github/copilot-instructions.md
                     echo ""
                     echo "## GitHub Copilot コードレビュー結果"
                     cat /tmp/copilot_review.txt 2>/dev/null || echo "（Copilotのレビュー結果なし）"

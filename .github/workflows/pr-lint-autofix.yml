@@ -31,15 +31,15 @@ jobs:
               id: pr-info
               uses: actions/github-script@v7
               with:
-                script: |
-                  const prNumber = context.issue.number;
-                  const { data: pr } = await github.rest.pulls.get({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    pull_number: prNumber,
-                  });
-                  core.setOutput('pr_number', String(prNumber));
-                  core.setOutput('head_ref', pr.head.ref);
+                  script: |
+                      const prNumber = context.issue.number;
+                      const { data: pr } = await github.rest.pulls.get({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        pull_number: prNumber,
+                      });
+                      core.setOutput('pr_number', String(prNumber));
+                      core.setOutput('head_ref', pr.head.ref);
 
             - name: PRブランチをチェックアウト
               uses: actions/checkout@v4
@@ -165,67 +165,67 @@ jobs:
             - name: Copilotのレビューコメントを取得
               uses: actions/github-script@v7
               with:
-                script: |
-                  const fs = require('fs');
-                  const prNumber = parseInt('${{ needs.prepare.outputs.pr_number }}');
+                  script: |
+                      const fs = require('fs');
+                      const prNumber = parseInt('${{ needs.prepare.outputs.pr_number }}');
 
-                  // レビュー本文（REST）
-                  const { data: reviews } = await github.rest.pulls.listReviews({
-                    owner: context.repo.owner, repo: context.repo.repo, pull_number: prNumber,
-                  });
-                  const copilotReview = reviews
-                    .filter(r => r.user.login.toLowerCase().includes('copilot'))
-                    .at(-1);
+                      // レビュー本文（REST）
+                      const { data: reviews } = await github.rest.pulls.listReviews({
+                        owner: context.repo.owner, repo: context.repo.repo, pull_number: prNumber,
+                      });
+                      const copilotReview = reviews
+                        .filter(r => r.user.login.toLowerCase().includes('copilot'))
+                        .at(-1);
 
-                  // インラインコメント（REST）
-                  const { data: comments } = await github.rest.pulls.listReviewComments({
-                    owner: context.repo.owner, repo: context.repo.repo, pull_number: prNumber,
-                  });
-                  const copilotComments = comments.filter(c =>
-                    c.user.login.toLowerCase().includes('copilot')
-                  );
+                      // インラインコメント（REST）
+                      const { data: comments } = await github.rest.pulls.listReviewComments({
+                        owner: context.repo.owner, repo: context.repo.repo, pull_number: prNumber,
+                      });
+                      const copilotComments = comments.filter(c =>
+                        c.user.login.toLowerCase().includes('copilot')
+                      );
 
-                  // codex用テキストファイル生成
-                  let reviewText = '## GitHub Copilot レビュー本文\n';
-                  reviewText += (copilotReview?.body ?? '') + '\n\n';
-                  reviewText += '## GitHub Copilot インラインコメント\n';
-                  for (const c of copilotComments) {
-                    reviewText += `ファイル: ${c.path} 行${c.line ?? c.original_line}: ${c.body}\n`;
-                  }
-                  fs.writeFileSync('/tmp/copilot_review.txt', reviewText);
+                      // codex用テキストファイル生成
+                      let reviewText = '## GitHub Copilot レビュー本文\n';
+                      reviewText += (copilotReview?.body ?? '') + '\n\n';
+                      reviewText += '## GitHub Copilot インラインコメント\n';
+                      for (const c of copilotComments) {
+                        reviewText += `ファイル: ${c.path} 行${c.line ?? c.original_line}: ${c.body}\n`;
+                      }
+                      fs.writeFileSync('/tmp/copilot_review.txt', reviewText);
 
-                  // スレッド詳細JSON（GraphQL）：後続の個別分析ステップで使用
-                  const result = await github.graphql(`
-                    query($owner: String!, $repo: String!, $prNumber: Int!) {
-                      repository(owner: $owner, name: $repo) {
-                        pullRequest(number: $prNumber) {
-                          reviewThreads(first: 100) {
-                            nodes {
-                              id isResolved path line originalLine
-                              comments(first: 1) {
-                                nodes { author { login } body }
+                      // スレッド詳細JSON（GraphQL）：後続の個別分析ステップで使用
+                      const result = await github.graphql(`
+                        query($owner: String!, $repo: String!, $prNumber: Int!) {
+                          repository(owner: $owner, name: $repo) {
+                            pullRequest(number: $prNumber) {
+                              reviewThreads(first: 100) {
+                                nodes {
+                                  id isResolved path line originalLine
+                                  comments(first: 1) {
+                                    nodes { author { login } body }
+                                  }
+                                }
                               }
                             }
                           }
                         }
-                      }
-                    }
-                  `, { owner: context.repo.owner, repo: context.repo.repo, prNumber });
+                      `, { owner: context.repo.owner, repo: context.repo.repo, prNumber });
 
-                  const threads = result.repository.pullRequest.reviewThreads.nodes
-                    .filter(n =>
-                      !n.isResolved &&
-                      n.comments.nodes[0]?.author?.login?.toLowerCase().includes('copilot')
-                    )
-                    .map(n => ({
-                      id: n.id,
-                      path: n.path,
-                      line: n.line ?? n.originalLine,
-                      body: n.comments.nodes[0].body,
-                    }));
+                      const threads = result.repository.pullRequest.reviewThreads.nodes
+                        .filter(n =>
+                          !n.isResolved &&
+                          n.comments.nodes[0]?.author?.login?.toLowerCase().includes('copilot')
+                        )
+                        .map(n => ({
+                          id: n.id,
+                          path: n.path,
+                          line: n.line ?? n.originalLine,
+                          body: n.comments.nodes[0].body,
+                        }));
 
-                  fs.writeFileSync('/tmp/copilot_threads.json', JSON.stringify(threads));
-                  console.log(`取得したCopilotスレッド数: ${threads.length}`);
+                      fs.writeFileSync('/tmp/copilot_threads.json', JSON.stringify(threads));
+                      console.log(`取得したCopilotスレッド数: ${threads.length}`);
 
             # CLAUDE.md・Copilotレビュー・ESLint・knipの結果を統合した修正プロンプトを生成する
             - name: 自動修正プロンプトを生成
@@ -333,48 +333,48 @@ jobs:
             - name: Copilotコメントに個別返信して選択的に解決済み更新
               uses: actions/github-script@v7
               env:
-                COMMIT_SHA: ${{ steps.commit-push.outputs.sha }}
+                  COMMIT_SHA: ${{ steps.commit-push.outputs.sha }}
               with:
-                script: |
-                  const fs = require('fs');
+                  script: |
+                      const fs = require('fs');
 
-                  const threads = JSON.parse(fs.readFileSync('/tmp/copilot_threads.json', 'utf8'));
-                  const resolutions = JSON.parse(
-                    fs.readFileSync('/tmp/comment_resolutions.json', 'utf8')
-                  );
-                  const commitSha = process.env.COMMIT_SHA ?? '（コミットなし）';
+                      const threads = JSON.parse(fs.readFileSync('/tmp/copilot_threads.json', 'utf8'));
+                      const resolutions = JSON.parse(
+                        fs.readFileSync('/tmp/comment_resolutions.json', 'utf8')
+                      );
+                      const commitSha = process.env.COMMIT_SHA ?? '（コミットなし）';
 
-                  for (const thread of threads) {
-                    const res = resolutions[thread.id] ?? {
-                      addressed: false, reason: '分析結果が取得できませんでした',
-                    };
+                      for (const thread of threads) {
+                        const res = resolutions[thread.id] ?? {
+                          addressed: false, reason: '分析結果が取得できませんでした',
+                        };
 
-                    const comment = res.addressed
-                      ? `🤖 **自動修正ツールによる対応（対応済み）**\n\n` +
-                        `この指摘はOpenAI Codex（gpt-5）による自動修正で対応しました。\n\n` +
-                        `**対応内容:** ${res.reason}\n\n` +
-                        `**対応コミット:** ${commitSha}`
-                      : `🤖 **自動修正ツールによる確認（未対応）**\n\n` +
-                        `この指摘は今回の自動修正では対応しませんでした。\n\n` +
-                        `**理由:** ${res.reason}\n\n` +
-                        `*CLAUDE.mdの開発規約に基づき、対応不要と判断した指摘は修正していません。手動での確認をお願いします。*`;
+                        const comment = res.addressed
+                          ? `🤖 **自動修正ツールによる対応（対応済み）**\n\n` +
+                            `この指摘はOpenAI Codex（gpt-5）による自動修正で対応しました。\n\n` +
+                            `**対応内容:** ${res.reason}\n\n` +
+                            `**対応コミット:** ${commitSha}`
+                          : `🤖 **自動修正ツールによる確認（未対応）**\n\n` +
+                            `この指摘は今回の自動修正では対応しませんでした。\n\n` +
+                            `**理由:** ${res.reason}\n\n` +
+                            `*CLAUDE.mdの開発規約に基づき、対応不要と判断した指摘は修正していません。手動での確認をお願いします。*`;
 
-                    await github.graphql(`
-                      mutation($threadId: ID!, $body: String!) {
-                        addPullRequestReviewThreadReply(input: {
-                          pullRequestReviewThreadId: $threadId, body: $body
-                        }) { comment { id } }
-                      }
-                    `, { threadId: thread.id, body: comment });
+                        await github.graphql(`
+                          mutation($threadId: ID!, $body: String!) {
+                            addPullRequestReviewThreadReply(input: {
+                              pullRequestReviewThreadId: $threadId, body: $body
+                            }) { comment { id } }
+                          }
+                        `, { threadId: thread.id, body: comment });
 
-                    if (res.addressed) {
-                      await github.graphql(`
-                        mutation($threadId: ID!) {
-                          resolveReviewThread(input: { threadId: $threadId }) { thread { isResolved } }
+                        if (res.addressed) {
+                          await github.graphql(`
+                            mutation($threadId: ID!) {
+                              resolveReviewThread(input: { threadId: $threadId }) { thread { isResolved } }
+                            }
+                          `, { threadId: thread.id });
+                          console.log(`対応済み・解決済みに更新: ${thread.id}`);
+                        } else {
+                          console.log(`未対応・resolveしない: ${thread.id}`);
                         }
-                      `, { threadId: thread.id });
-                      console.log(`対応済み・解決済みに更新: ${thread.id}`);
-                    } else {
-                      console.log(`未対応・resolveしない: ${thread.id}`);
-                    }
-                  }
+                      }

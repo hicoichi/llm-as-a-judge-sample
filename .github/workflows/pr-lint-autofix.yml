@@ -1,9 +1,11 @@
 name: PR自動修正（Copilot連携）
 
 on:
-    # Copilotレビュー完了時のみトリガー
-    pull_request_review:
-        types: [submitted]
+    # PRに「@review」とコメントすることでトリガーする
+    # issue_commentのactorはコメントした人間（write権限あり）になるため
+    # codex-actionのcollaboratorチェックを確実に通過できる
+    issue_comment:
+        types: [created]
 
 permissions:
     contents: write
@@ -11,17 +13,34 @@ permissions:
 
 jobs:
     # ──────────────────────────────────────────────
-    # ジョブ1: 前準備（Copilotレビューのみを対象にフィルタリング）
+    # ジョブ1: 前準備
+    # PRへの「@review」コメントのみを対象とし、head_refをAPIで取得して後続ジョブに渡す
     # ──────────────────────────────────────────────
     prepare:
         runs-on: ubuntu-latest
-        # Copilot以外のレビューはスキップ（downstream jobも連鎖してスキップされる）
-        if: contains(github.event.review.user.login, 'copilot')
+        # PRへのコメントかつ「@review」を含む場合のみ実行する
+        if: |
+            github.event.issue.pull_request != null &&
+            contains(github.event.comment.body, '@review')
+        outputs:
+            head_ref: ${{ steps.pr-info.outputs.head_ref }}
+            pr_number: ${{ steps.pr-info.outputs.pr_number }}
         steps:
+            # issue_commentイベントにはhead.refが含まれないためAPIで取得する
+            - name: PRのブランチ情報を取得
+              id: pr-info
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  PR_NUMBER="${{ github.event.issue.number }}"
+                  HEAD_REF=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER" --jq '.head.ref')
+                  echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+                  echo "head_ref=$HEAD_REF"   >> $GITHUB_OUTPUT
+
             - name: PRブランチをチェックアウト
               uses: actions/checkout@v4
               with:
-                  ref: ${{ github.event.pull_request.head.ref }}
+                  ref: ${{ steps.pr-info.outputs.head_ref }}
 
             - name: Node.js 24をセットアップ
               uses: actions/setup-node@v4
@@ -29,12 +48,12 @@ jobs:
                   node-version: '24'
                   cache: 'npm'
 
-            # npm ciを実行してnpmキャッシュを作成し、後続ジョブのインストールを高速化する
+            # npm ciを実行してキャッシュを作成し後続ジョブのインストールを高速化する
             - name: 依存関係をインストール
               run: npm ci
 
     # ──────────────────────────────────────────────
-    # ジョブ2: ESLint静的解析（prepareと並列でknipと同時実行）
+    # ジョブ2: ESLint静的解析（prepareの後、knipと並列実行）
     # ──────────────────────────────────────────────
     lint:
         runs-on: ubuntu-latest
@@ -43,7 +62,7 @@ jobs:
             - name: PRブランチをチェックアウト
               uses: actions/checkout@v4
               with:
-                  ref: ${{ github.event.pull_request.head.ref }}
+                  ref: ${{ needs.prepare.outputs.head_ref }}
 
             - name: Node.js 24をセットアップ
               uses: actions/setup-node@v4
@@ -77,7 +96,7 @@ jobs:
             - name: PRブランチをチェックアウト
               uses: actions/checkout@v4
               with:
-                  ref: ${{ github.event.pull_request.head.ref }}
+                  ref: ${{ needs.prepare.outputs.head_ref }}
 
             - name: Node.js 24をセットアップ
               uses: actions/setup-node@v4
@@ -106,13 +125,13 @@ jobs:
     # ──────────────────────────────────────────────
     autofix:
         runs-on: ubuntu-latest
-        needs: [lint, knip]
+        needs: [prepare, lint, knip]
         steps:
             # pushできるようfetch-depth: 0でフルクローン
             - name: PRブランチをチェックアウト
               uses: actions/checkout@v4
               with:
-                  ref: ${{ github.event.pull_request.head.ref }}
+                  ref: ${{ needs.prepare.outputs.head_ref }}
                   fetch-depth: 0
 
             - name: Node.js 24をセットアップ
@@ -137,18 +156,19 @@ jobs:
                   name: knip-results
               continue-on-error: true
 
-            # Copilotのレビュー本文とインラインコメントをGH APIで取得して1ファイルにまとめる
+            # CopilotのレビューをAPIで取得する（issue_commentイベントにはreview情報がないため）
             - name: Copilotのレビューコメントを取得
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
+                  PR_NUMBER="${{ needs.prepare.outputs.pr_number }}"
                   {
                     echo "## GitHub Copilot レビュー本文"
-                    echo "${{ github.event.review.body }}"
+                    gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" \
+                      --jq '[.[] | select(.user.login | ascii_downcase | contains("copilot"))] | last | .body // ""'
                     echo ""
                     echo "## GitHub Copilot インラインコメント"
-                    gh api \
-                      repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments \
+                    gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/comments" \
                       --jq '.[] | select(.user.login | ascii_downcase | contains("copilot")) |
                             "ファイル: \(.path) 行\(.line // .original_line): \(.body)"'
                   } > /tmp/copilot_review.txt
@@ -182,13 +202,11 @@ jobs:
                     cat knip_results.json 2>/dev/null || echo "（knip結果なし）"
                   } > /tmp/fix-prompt.txt
 
-            # github-tokenにPATを渡すことでactorをPAT所有者（write権限あり）として認識させる
-            # GH_PATはリポジトリへのcontents: writeスコープを持つFine-grained PATをSecretsに設定すること
+            # actorはコメントした人間（write権限あり）のためcollaboratorチェックを通過する
             - name: OpenAI Codex（gpt-5）でコード自動修正
               uses: openai/codex-action@v1
               with:
                   openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-                  github-token: ${{ secrets.GH_PAT }}
                   model: gpt-5
                   prompt-file: /tmp/fix-prompt.txt
                   safety-strategy: drop-sudo
@@ -212,11 +230,13 @@ jobs:
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  # 修正内容サマリーを読み込む（なければデフォルトメッセージを使用）
+                  PR_NUMBER="${{ needs.prepare.outputs.pr_number }}"
+                  REPO_OWNER="${{ github.repository_owner }}"
+                  REPO_NAME="${GITHUB_REPOSITORY#*/}"
+
                   CODEX_SUMMARY=$(cat /tmp/codex-output.txt 2>/dev/null | head -c 1000 || echo "自動修正ツールにより対応しました。")
                   COMMIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "（コミットなし）")
 
-                  # 解決理由のコメントテンプレートを生成
                   RESOLVE_COMMENT="🤖 **自動修正ツールによる対応**
 
                   この指摘はOpenAI Codex（gpt-5）による自動修正で対応しました。
@@ -228,7 +248,7 @@ jobs:
 
                   *CLAUDE.mdの開発規約に基づき、対応が必要と判断された指摘のみを修正しています。*"
 
-                  # 未解決のCopilotスレッドIDとコメントIDをGraphQL APIで取得
+                  # 未解決のCopilotスレッドIDをGraphQL APIで取得
                   gh api graphql -f query='
                     query($owner: String!, $repo: String!, $prNumber: Int!) {
                       repository(owner: $owner, name: $repo) {
@@ -249,9 +269,9 @@ jobs:
                       }
                     }
                   ' \
-                    -f owner=${{ github.repository_owner }} \
-                    -f repo=${{ github.event.repository.name }} \
-                    -F prNumber=${{ github.event.pull_request.number }} \
+                    -f owner="$REPO_OWNER" \
+                    -f repo="$REPO_NAME" \
+                    -F prNumber="$PR_NUMBER" \
                     --jq '
                       .data.repository.pullRequest.reviewThreads.nodes[]
                       | select(

@@ -23,9 +23,9 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">70.45% </span>
+                <span class="strong">68.18% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>31/44</span>
+                <span class='fraction'>30/44</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">69.23% </span>
+                <span class="strong">65.85% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>27/39</span>
+                <span class='fraction'>27/41</span>
             </div>
         
             
@@ -187,15 +187,43 @@
 <a name='L122'></a><a href='#L122'>122</a>
 <a name='L123'></a><a href='#L123'>123</a>
 <a name='L124'></a><a href='#L124'>124</a>
-<a name='L125'></a><a href='#L125'>125</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L125'></a><a href='#L125'>125</a>
+<a name='L126'></a><a href='#L126'>126</a>
+<a name='L127'></a><a href='#L127'>127</a>
+<a name='L128'></a><a href='#L128'>128</a>
+<a name='L129'></a><a href='#L129'>129</a>
+<a name='L130'></a><a href='#L130'>130</a>
+<a name='L131'></a><a href='#L131'>131</a>
+<a name='L132'></a><a href='#L132'>132</a>
+<a name='L133'></a><a href='#L133'>133</a>
+<a name='L134'></a><a href='#L134'>134</a>
+<a name='L135'></a><a href='#L135'>135</a>
+<a name='L136'></a><a href='#L136'>136</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
@@ -250,9 +278,6 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">3x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -276,6 +301,7 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -295,10 +321,6 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -313,29 +335,46 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">// 注文処理Lambda
 &nbsp;
-import * as crypto from 'crypto';
-&nbsp;
 const ORDERS_TABLE = 'orders-table-prod';
 const HISTORY_TABLE = 'order-history-prod';
 const SNS_TOPIC = 'arn:aws:sns:ap-northeast-1:123456789012:order-notifications';
 &nbsp;
-const db: any = { put: async (p: any) =&gt; p, get: <span class="fstat-no" title="function not covered" >async </span>(p: any) =&gt; <span class="cstat-no" title="statement not covered" >p </span>};
-const snsClient: any = { publish: async (p: any) =&gt; p };
+// 最小限の型定義（外部依存を増やさない）
+type ApiEvent = { body: string };
+type OrderItem = { price: number; quantity: number };
+type OrderRequest = { orderId?: string; userId?: string; items?: OrderItem[] };
+type LambdaResponse = { statusCode: number; body: string };
 &nbsp;
-export const handler = async (event: any) =&gt; {
+interface DbPutInput { TableName: string; Item: Record&lt;string, unknown&gt; }
+interface DbGetInput { TableName: string; Key: { orderId: string } }
+interface DbClient {
+    put: (p: DbPutInput) =&gt; Promise&lt;DbPutInput&gt;;
+    get: (p: DbGetInput) =&gt; Promise&lt;Record&lt;string, unknown&gt;&gt;;
+}
+&nbsp;
+interface SnsPublishInput { TopicArn: string; Message: string; Subject?: string }
+interface SnsClient { publish: (p: SnsPublishInput) =&gt; Promise&lt;SnsPublishInput&gt; }
+&nbsp;
+const db: DbClient = {
+    put: async (p) =&gt; p,
+    get: <span class="fstat-no" title="function not covered" >async </span>(p) =&gt; (<span class="cstat-no" title="statement not covered" >{ ...p })</span>,
+};
+const snsClient: SnsClient = { publish: async (p) =&gt; p };
+&nbsp;
+export const handler = async (event: ApiEvent): Promise&lt;LambdaResponse&gt; =&gt; {
     const body = JSON.parse(event.body);
 &nbsp;
-    var orderId = body.orderId;
-    var userId = body.userId;
-    var items = body.items;
-    var discount = 0;
+    const orderId = (body as OrderRequest).orderId;
+    const userId = (body as OrderRequest).userId;
+    const items = (body as OrderRequest).items;
+    let discount = 0;
 &nbsp;
     if (items) {
         if (items.length &gt; 0) {
             if (userId) {
                 if (orderId) {
-                    var total = 0;
-                    for (var i = 0; i &lt; items.length; i++) {
+                    let total = 0;
+                    for (let i = 0; i &lt; items.length; i++) {
                         <span class="missing-if-branch" title="else path not taken" >E</span>if (items[i].price &amp;&amp; items[i].quantity) {
                             total += items[i].price * items[i].quantity;
                         }
@@ -370,12 +409,9 @@ export const handler = async (event: any) =&gt; {
 &nbsp;
                     snsClient.publish({
                         TopicArn: SNS_TOPIC,
-                        Message:
-                            '注文受付: ' + orderId + ' 合計: ' + finalTotal,
+                        Message: '注文受付: ' + orderId + ' 合計: ' + finalTotal,
                         Subject: 'New Order',
                     });
-&nbsp;
-                    const processedAt = new Date().toISOString();
 &nbsp;
                     return {
                         statusCode: 200,
@@ -389,7 +425,7 @@ export const handler = async (event: any) =&gt; {
     return { statusCode: 400, body: JSON.stringify({ error: 'Invalid' }) };
 };
 &nbsp;
-async function <span class="fstat-no" title="function not covered" >processRefund(</span>orderId: any, userId: any, amount: any) {
+async function <span class="fstat-no" title="function not covered" >processRefund(</span>orderId: string, userId: string, amount: number) {
 <span class="cstat-no" title="statement not covered" >    if (orderId) {</span>
 <span class="cstat-no" title="statement not covered" >        if (userId) {</span>
 <span class="cstat-no" title="statement not covered" >            if (amount &gt; 0) {</span>
@@ -398,7 +434,8 @@ async function <span class="fstat-no" title="function not covered" >processRefun
                     Key: { orderId },
                 });
 <span class="cstat-no" title="statement not covered" >                if (existing) {</span>
-<span class="cstat-no" title="statement not covered" >                    if (existing.status === 'COMPLETED') {</span>
+                    const status = (<span class="cstat-no" title="statement not covered" >existing as { status?: string }).status;</span>
+<span class="cstat-no" title="statement not covered" >                    if (status === 'COMPLETED') {</span>
 <span class="cstat-no" title="statement not covered" >                        await db.put({</span>
                             TableName: ORDERS_TABLE,
                             Item: {
@@ -420,11 +457,7 @@ async function <span class="fstat-no" title="function not covered" >processRefun
 &nbsp;
 <span class="cstat-no" title="statement not covered" >                        await snsClient.publish({</span>
                             TopicArn: SNS_TOPIC,
-                            Message:
-                                'Refund processed: ' +
-                                orderId +
-                                ' amount: ' +
-                                amount,
+                            Message: 'Refund processed: ' + orderId + ' amount: ' + amount,
                         });
 &nbsp;
 <span class="cstat-no" title="statement not covered" >                        return { success: true };</span>
@@ -442,7 +475,7 @@ async function <span class="fstat-no" title="function not covered" >processRefun
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-02-25T15:41:03.771Z
+                at 2026-02-25T16:43:24.285Z
             </div>
         <script src="prettify.js"></script>
         <script>

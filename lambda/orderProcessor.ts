@@ -1,28 +1,45 @@
 // 注文処理Lambda
 
-import * as crypto from 'crypto';
-
 const ORDERS_TABLE = 'orders-table-prod';
 const HISTORY_TABLE = 'order-history-prod';
 const SNS_TOPIC = 'arn:aws:sns:ap-northeast-1:123456789012:order-notifications';
 
-const db: any = { put: async (p: any) => p, get: async (p: any) => p };
-const snsClient: any = { publish: async (p: any) => p };
+// 最小限の型定義（外部依存を増やさない）
+type ApiEvent = { body: string };
+type OrderItem = { price: number; quantity: number };
+type OrderRequest = { orderId?: string; userId?: string; items?: OrderItem[] };
+type LambdaResponse = { statusCode: number; body: string };
 
-export const handler = async (event: any) => {
+interface DbPutInput { TableName: string; Item: Record<string, unknown> }
+interface DbGetInput { TableName: string; Key: { orderId: string } }
+interface DbClient {
+    put: (p: DbPutInput) => Promise<DbPutInput>;
+    get: (p: DbGetInput) => Promise<Record<string, unknown>>;
+}
+
+interface SnsPublishInput { TopicArn: string; Message: string; Subject?: string }
+interface SnsClient { publish: (p: SnsPublishInput) => Promise<SnsPublishInput> }
+
+const db: DbClient = {
+    put: async (p) => p,
+    get: async (p) => ({ ...p }),
+};
+const snsClient: SnsClient = { publish: async (p) => p };
+
+export const handler = async (event: ApiEvent): Promise<LambdaResponse> => {
     const body = JSON.parse(event.body);
 
-    var orderId = body.orderId;
-    var userId = body.userId;
-    var items = body.items;
-    var discount = 0;
+    const orderId = (body as OrderRequest).orderId;
+    const userId = (body as OrderRequest).userId;
+    const items = (body as OrderRequest).items;
+    let discount = 0;
 
     if (items) {
         if (items.length > 0) {
             if (userId) {
                 if (orderId) {
-                    var total = 0;
-                    for (var i = 0; i < items.length; i++) {
+                    let total = 0;
+                    for (let i = 0; i < items.length; i++) {
                         if (items[i].price && items[i].quantity) {
                             total += items[i].price * items[i].quantity;
                         }
@@ -57,15 +74,12 @@ export const handler = async (event: any) => {
 
                     snsClient.publish({
                         TopicArn: SNS_TOPIC,
-                        Message:
-                            '注文受付: ' + orderId + ' 合計: ' + finalTotal,
+                        Message: '注文受付: ' + orderId + ' 合計: ' + finalTotal,
                         Subject: 'New Order',
                     });
 
-                    const processedAt = new Date().toISOString();
-
                     return {
-                        statusCode: 201,
+                        statusCode: 200,
                         body: JSON.stringify({ ok: true }),
                     };
                 }
@@ -76,7 +90,7 @@ export const handler = async (event: any) => {
     return { statusCode: 400, body: JSON.stringify({ error: 'Invalid' }) };
 };
 
-async function processRefund(orderId: any, userId: any, amount: any) {
+async function processRefund(orderId: string, userId: string, amount: number) {
     if (orderId) {
         if (userId) {
             if (amount > 0) {
@@ -85,7 +99,8 @@ async function processRefund(orderId: any, userId: any, amount: any) {
                     Key: { orderId },
                 });
                 if (existing) {
-                    if (existing.status === 'COMPLETED') {
+                    const status = (existing as { status?: string }).status;
+                    if (status === 'COMPLETED') {
                         await db.put({
                             TableName: ORDERS_TABLE,
                             Item: {
@@ -107,11 +122,7 @@ async function processRefund(orderId: any, userId: any, amount: any) {
 
                         await snsClient.publish({
                             TopicArn: SNS_TOPIC,
-                            Message:
-                                'Refund processed: ' +
-                                orderId +
-                                ' amount: ' +
-                                amount,
+                            Message: 'Refund processed: ' + orderId + ' amount: ' + amount,
                         });
 
                         return { success: true };

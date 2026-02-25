@@ -380,12 +380,23 @@ jobs:
                       }]
                     }' > /tmp/analysis-request.json
 
-                  # OpenAI APIを呼び出し、JSONレスポンスを保存
-                  curl -s https://api.openai.com/v1/chat/completions \
+                  # OpenAI APIを呼び出し、レスポンスを変数に保存してからパースする
+                  # （直接パイプするとcontent=nullの場合にfromjsonがexit 5で失敗するため）
+                  API_RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
                     -H "Content-Type: application/json" \
                     -H "Authorization: Bearer $OPENAI_API_KEY" \
-                    -d @/tmp/analysis-request.json \
-                    | jq '.choices[0].message.content | fromjson' > /tmp/comment_resolutions.json
+                    -d @/tmp/analysis-request.json)
+
+                  # contentをraw文字列で取得（nullの場合は空文字になる）
+                  CONTENT=$(echo "$API_RESPONSE" | jq -r '.choices[0].message.content // empty')
+
+                  if [ -z "$CONTENT" ]; then
+                    echo "警告: APIレスポンスのcontentが取得できませんでした。レスポンス内容:"
+                    echo "$API_RESPONSE" | jq '.' || echo "$API_RESPONSE"
+                    echo "{}" > /tmp/comment_resolutions.json
+                  else
+                    echo "$CONTENT" | jq '.' > /tmp/comment_resolutions.json
+                  fi
 
             # 各CopilotスレッドにAI分析結果を元に個別返信し、対応済みのみ解決済みに更新する
             - name: Copilotコメントに個別返信して選択的に解決済み更新

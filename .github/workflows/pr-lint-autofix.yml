@@ -125,11 +125,47 @@ jobs:
                   if-no-files-found: warn
 
     # ──────────────────────────────────────────────
-    # ジョブ4: Copilotレビュー取得 → 自動修正 → PR解決済み更新
+    # ジョブ4: Jestテスト実行・カバレッジ計測（lintと並列実行）
+    # ──────────────────────────────────────────────
+    test:
+        runs-on: ubuntu-latest
+        needs: [prepare]
+        steps:
+            - name: PRブランチをチェックアウト
+              uses: actions/checkout@v4
+              with:
+                  ref: ${{ needs.prepare.outputs.head_ref }}
+
+            - name: Node.js 24をセットアップ
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '24'
+                  cache: 'npm'
+
+            - name: 依存関係をインストール
+              run: npm ci
+
+            # テストが失敗しても後続ステップに進むためcontinue-on-error: trueを設定
+            - name: テストを実行（JSON出力・カバレッジ計測）
+              continue-on-error: true
+              run: npx jest --json --outputFile=jest_results.json --coverage --coverageReporters=json-summary
+
+            # autofixジョブで参照するためアーティファクトとして保存
+            - name: テスト結果をアーティファクトとして保存
+              uses: actions/upload-artifact@v4
+              with:
+                  name: test-results
+                  path: |
+                      jest_results.json
+                      coverage/coverage-summary.json
+                  if-no-files-found: warn
+
+    # ──────────────────────────────────────────────
+    # ジョブ5: Copilotレビュー取得 → 自動修正 → PR解決済み更新
     # ──────────────────────────────────────────────
     autofix:
         runs-on: ubuntu-latest
-        needs: [prepare, lint, knip]
+        needs: [prepare, lint, knip, test]
         steps:
             # pushできるようfetch-depth: 0でフルクローン
             - name: PRブランチをチェックアウト
@@ -158,6 +194,12 @@ jobs:
               uses: actions/download-artifact@v4
               with:
                   name: knip-results
+              continue-on-error: true
+
+            - name: テスト結果をダウンロード
+              uses: actions/download-artifact@v4
+              with:
+                  name: test-results
               continue-on-error: true
 
             # CopilotのレビューをAPIで取得する（issue_commentイベントにはreview情報がないため）
@@ -240,6 +282,8 @@ jobs:
                     echo "- ESLintの警告（severity=1）は、copilot-instructions.mdの規約に明確に違反している場合のみ修正する"
                     echo "- knipの未使用コードは、DRY原則・単一責任の原則に違反している場合のみ修正する"
                     echo "- Copilotのレビューコメントは、開発規約に違反している指摘のみ修正する"
+                    echo "- テストが1件でも失敗している場合は必ず修正して全件成功させること"
+                    echo "- linesカバレッジが65%未満の場合はテストを追加・修正してカバレッジを改善すること"
                     echo "- 動作に影響しない軽微な問題・好みの問題は修正しない"
                     echo "- AWS CDKコンストラクタの構造・動作は変えない"
                     echo ""
@@ -254,6 +298,12 @@ jobs:
                     echo ""
                     echo "## knip未使用コード解析結果（JSON）"
                     cat knip_results.json 2>/dev/null || echo "（knip結果なし）"
+                    echo ""
+                    echo "## Jestテスト実行結果（JSON）"
+                    cat jest_results.json 2>/dev/null || echo "（テスト結果なし）"
+                    echo ""
+                    echo "## Jestカバレッジ結果（JSON）"
+                    cat coverage/coverage-summary.json 2>/dev/null || echo "（カバレッジ結果なし）"
                   } > /tmp/fix-prompt.txt
 
             # actorはコメントした人間（write権限あり）のためcollaboratorチェックを通過する

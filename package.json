@@ -1,32 +1,46 @@
 {
-  "name": "llm-as-a-judge-sample",
-  "version": "0.1.0",
-  "bin": {
-    "llm-as-a-judge-sample": "bin/llm-as-a-judge-sample.js"
-  },
-  "scripts": {
-    "build": "tsc",
-    "watch": "tsc -w",
-    "test": "jest",
-    "cdk": "cdk",
-    "lint": "eslint . --format json --output-file eslint_results.json",
-    "lint:check": "eslint .",
-    "knip": "knip --reporter json > knip_results.json"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.0.0",
-    "@types/jest": "^30",
-    "@types/node": "^24.10.1",
-    "jest": "^30",
-    "knip": "^5.0.0",
-    "ts-jest": "^29",
-    "aws-cdk": "2.1106.1",
-    "ts-node": "^10.9.2",
-    "typescript": "~5.9.3",
-    "typescript-eslint": "^8.0.0"
-  },
-  "dependencies": {
-    "aws-cdk-lib": "^2.238.0",
-    "constructs": "^10.0.0"
-  }
+    "name": "llm-as-a-judge-sample",
+    "version": "0.1.0",
+    "bin": {
+        "llm-as-a-judge-sample": "bin/llm-as-a-judge-sample.js"
+    },
+    "scripts": {
+        "build": "tsc",
+        "watch": "tsc -w",
+        "test": "jest",
+        "test:coverage": "jest --coverage",
+        "ci": "npm-run-all --continue-on-error test:coverage lint:check quality report",
+        "report": "node scripts/report.js",
+        "cdk": "cdk",
+        "lint": "eslint . --format json --output-file eslint_results.json",
+        "lint:check": "eslint .",
+        "knip": "knip --reporter json > knip_results.json",
+        "quality": "npm-run-all --continue-on-error quality:types quality:complexity quality:duplication quality:security quality:deps",
+        "quality:types": "tsc --noEmit",
+        "quality:complexity": "npm-run-all --continue-on-error quality:complexity:scan quality:complexity:count",
+        "quality:complexity:scan": "eslint lambda lib --format json --output-file eslint_results.json",
+        "quality:complexity:count": "node -e \"const r=require('./eslint_results.json');const n=r.flatMap(f=>f.messages).filter(m=>m.ruleId&&/complexity/.test(m.ruleId)).length;console.log('complexity violations:', n)\"",
+        "quality:duplication": "jscpd lambda lib --min-lines 5 --reporters console",
+        "quality:security": "npm audit",
+        "quality:deps": "npx depcheck"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.0.0",
+        "@types/jest": "^30",
+        "@types/node": "^24.10.1",
+        "aws-cdk": "2.1106.1",
+        "eslint-plugin-sonarjs": "^4.0.0",
+        "jest": "^30",
+        "jscpd": "^4.0.8",
+        "knip": "^5.0.0",
+        "npm-run-all": "^4.1.5",
+        "ts-jest": "^29",
+        "ts-node": "^10.9.2",
+        "typescript": "~5.9.3",
+        "typescript-eslint": "^8.0.0"
+    },
+    "dependencies": {
+        "aws-cdk-lib": "^2.238.0",
+        "constructs": "^10.0.0"
+    }
 }

@@ -1,5 +1,6 @@
 import eslint from '@eslint/js';
 import tseslint from 'typescript-eslint';
+import sonarjs from 'eslint-plugin-sonarjs';
 
 export default tseslint.config(
   {
@@ -17,9 +18,16 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    plugins: {
+      sonarjs,
+    },
     rules: {
       '@typescript-eslint/no-unused-vars': 'warn',
       '@typescript-eslint/explicit-function-return-type': 'off',
+      // 認知的複雑度が15を超えた場合に警告
+      'sonarjs/cognitive-complexity': ['warn', 15],
+      // 重複文字列リテラルを警告
+      'sonarjs/no-duplicate-string': 'warn',
     },
   },
 );

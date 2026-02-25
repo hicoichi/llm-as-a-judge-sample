@@ -22,7 +22,7 @@ export class LlmAsAJudgeSampleStack extends cdk.Stack {
             handler: 'orderProcessor.handler',
             timeout: cdk.Duration.seconds(300),
             environment: {
-                ORDERS_TABLE: 'orders-table-prod',
+                ORDERS_TABLE: ordersTable.tableName,
                 HISTORY_TABLE: 'order-history-prod',
                 SNS_TOPIC:
                     'arn:aws:sns:ap-northeast-1:123456789012:order-notifications',

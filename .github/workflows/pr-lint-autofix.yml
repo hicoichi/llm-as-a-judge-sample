@@ -227,24 +227,24 @@ jobs:
                       fs.writeFileSync('/tmp/copilot_threads.json', JSON.stringify(threads));
                       console.log(`取得したCopilotスレッド数: ${threads.length}`);
 
-            # CLAUDE.md・Copilotレビュー・ESLint・knipの結果を統合した修正プロンプトを生成する
+            # copilot-instructions.md・Copilotレビュー・ESLint・knipの結果を統合した修正プロンプトを生成する
             - name: 自動修正プロンプトを生成
               run: |
                   {
                     echo "あなたはTypeScript/AWS CDKの専門家です。"
-                    echo "以下の開発規約（CLAUDE.md）に従い、コードレビュー・静的解析の結果のうち"
+                    echo "以下の開発規約（copilot-instructions.md）に従い、コードレビュー・静的解析の結果のうち"
                     echo "「対応が必要」と判断したものだけを修正してください。"
                     echo ""
                     echo "## 修正の判断基準（必ず守ること）"
                     echo "- ESLintのエラー（severity=2）は必ず修正する"
-                    echo "- ESLintの警告（severity=1）は、CLAUDE.mdの規約に明確に違反している場合のみ修正する"
+                    echo "- ESLintの警告（severity=1）は、copilot-instructions.mdの規約に明確に違反している場合のみ修正する"
                     echo "- knipの未使用コードは、DRY原則・単一責任の原則に違反している場合のみ修正する"
                     echo "- Copilotのレビューコメントは、開発規約に違反している指摘のみ修正する"
                     echo "- 動作に影響しない軽微な問題・好みの問題は修正しない"
                     echo "- AWS CDKコンストラクタの構造・動作は変えない"
                     echo ""
-                    echo "## 開発規約（CLAUDE.md）"
-                    cat CLAUDE.md
+                    echo "## 開発規約(copilot-instructions.md)"
+                    cat .github/copilot-instructions.md
                     echo ""
                     echo "## GitHub Copilot コードレビュー結果"
                     cat /tmp/copilot_review.txt 2>/dev/null || echo "（Copilotのレビュー結果なし）"
@@ -283,24 +283,29 @@ jobs:
                     echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
                   fi
 
-            # git diffとCopilotコメントをOpenAI APIで照合し、コメントごとに対応状況を判定する
+            # git diff・codexサマリー・開発規約・Copilotコメントを材料にgpt-4oで対応状況を分析する
             - name: 各Copilotコメントへの対応状況をAIで分析
               env:
                   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
               run: |
-                  # 修正コミットのdiffを取得（変更なしの場合は空文字）
-                  GIT_DIFF=$(git diff HEAD~1 HEAD 2>/dev/null || echo "")
                   THREADS=$(cat /tmp/copilot_threads.json 2>/dev/null || echo "[]")
 
                   # スレッドが0件の場合はスキップ
                   if [ "$(echo "$THREADS" | jq 'length')" -eq 0 ]; then
-                    echo "[]" > /tmp/comment_resolutions.json
+                    echo "{}" > /tmp/comment_resolutions.json
                     exit 0
                   fi
+
+                  # 各分析材料を取得（存在しない場合は空文字でフォールバック）
+                  GIT_DIFF=$(git diff HEAD~1 HEAD 2>/dev/null || echo "")
+                  CODEX_OUTPUT=$(cat /tmp/codex-output.txt 2>/dev/null || echo "")
+                  DEV_RULES=$(cat .github/copilot-instructions.md 2>/dev/null || echo "")
 
                   # jqでAPIリクエストボディを組み立てる（シェル変数の特殊文字をエスケープ）
                   jq -n \
                     --arg diff "$GIT_DIFF" \
+                    --arg codex_output "$CODEX_OUTPUT" \
+                    --arg dev_rules "$DEV_RULES" \
                     --argjson threads "$THREADS" \
                     '{
                       model: "gpt-4o",
@@ -308,14 +313,17 @@ jobs:
                       messages: [{
                         role: "user",
                         content: (
-                          "以下のgit diffとGitHub Copilotのレビューコメント一覧を照合し、"
-                          + "各コメントがこのコミットで対応されたかを判定してください。\n\n"
-                          + "判定基準:\n"
-                          + "- diffにコメントで指摘された問題への対応変更がある → addressed: true\n"
-                          + "- 対応する変更がない/無関係な変更のみ → addressed: false\n"
-                          + "- reasonは日本語で具体的に記載すること\n\n"
-                          + "出力形式（コードブロックなしのJSONオブジェクト）:\n"
+                          "あなたはコードレビューの判定アシスタントです。\n"
+                          + "以下の情報を総合的に参照し、各CopilotレビューコメントがAI自動修正で対応されたかを判定してください。\n\n"
+                          + "## 判定ルール\n"
+                          + "- addressed: true → 開発規約に照らして対応が必要と判断され、git diffに対応変更が確認できる\n"
+                          + "- addressed: false → 開発規約に照らして対応不要と判断された（動作に影響しない・好みの問題・規約違反でない等）\n"
+                          + "- reason には「開発規約の○○に基づき〜」のように規約の観点を必ず明記すること\n"
+                          + "- 「差分がない」「変更がなかった」だけの理由は不可。必ず規約観点の説明を含めること\n\n"
+                          + "## 出力形式（コードブロックなしのJSONオブジェクト）\n"
                           + "{\"<スレッドID>\": {\"addressed\": true/false, \"reason\": \"理由\"}, ...}\n\n"
+                          + "## 開発規約（copilot-instructions.md）\n" + $dev_rules + "\n\n"
+                          + "## AIによる修正サマリー（codex-output）\n" + $codex_output + "\n\n"
                           + "## Git Diff\n" + $diff + "\n\n"
                           + "## Copilotコメント一覧（JSON）\n" + ($threads | tostring)
                         )
@@ -357,7 +365,7 @@ jobs:
                           : `🤖 **自動修正ツールによる確認（未対応）**\n\n` +
                             `この指摘は今回の自動修正では対応しませんでした。\n\n` +
                             `**理由:** ${res.reason}\n\n` +
-                            `*CLAUDE.mdの開発規約に基づき、対応不要と判断した指摘は修正していません。手動での確認をお願いします。*`;
+                            `*copilot-instructions.mdの開発規約に基づき、対応不要と判断した指摘は修正していません。手動での確認をお願いします。*`;
 
                         await github.graphql(`
                           mutation($threadId: ID!, $body: String!) {

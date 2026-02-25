@@ -254,6 +254,21 @@ jobs:
                     echo ""
                     echo "## knip未使用コード解析結果（JSON）"
                     cat knip_results.json 2>/dev/null || echo "（knip結果なし）"
+                    echo ""
+                    echo "## 重要: 修正完了後の必須出力"
+                    echo "すべての修正が完了したら、必ず /tmp/comment_resolutions.json を作成すること。"
+                    echo "以下の「Copilotレビュースレッド一覧」の各スレッドについて、"
+                    echo "対応したか否かと、その理由を開発規約の観点から具体的に記述した JSON を出力すること。"
+                    echo ""
+                    echo "理由の記述ルール:"
+                    echo "- addressed: true の場合 → 開発規約のどの項目に違反していたか・どのように修正したかを記述"
+                    echo "- addressed: false の場合 → 開発規約のどの項目に照らして対応不要と判断したかを記述（「差分がない」は理由として不十分）"
+                    echo ""
+                    echo "出力形式（コードブロックなし・JSONオブジェクト）:"
+                    echo '{"<スレッドID>": {"addressed": true, "reason": "理由"}, "<スレッドID2>": {"addressed": false, "reason": "理由"}, ...}'
+                    echo ""
+                    echo "## Copilotレビュースレッド一覧（参照用）"
+                    cat /tmp/copilot_threads.json 2>/dev/null || echo "[]"
                   } > /tmp/fix-prompt.txt
 
             # actorはコメントした人間（write権限あり）のためcollaboratorチェックを通過する

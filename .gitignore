@@ -1,9 +1,20 @@
+# コンパイル成果物
 *.js
 !jest.config.js
 !scripts/report.js
 *.d.ts
+
+# 依存パッケージ
 node_modules/
 
-# CDK asset staging directory
+# ツール出力（実行のたびに再生成されるファイル）
+coverage/
+jest_results.json
+eslint_results.json
+knip_results.json
+report.json
+jscpd-report/
+
+# CDK
 .cdk.staging
 cdk.out
